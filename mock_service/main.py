@@ -30,6 +30,7 @@ def set_scenario(data: Scenario) -> dict:
 async def deliver(payload: dict, idempotency_key: str = Header(alias="Idempotency-Key")) -> dict:
     if scenario["mode"] == "timeout":
         await asyncio.sleep(int(scenario["delay_ms"]) / 1000)
+        raise HTTPException(status_code=504, detail="Configured mock timeout")
     if scenario["mode"] == "http_error":
         raise HTTPException(
             status_code=int(scenario["status_code"]), detail="Configured mock failure"

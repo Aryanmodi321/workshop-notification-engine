@@ -26,4 +26,5 @@ def test_mock_service_success_error_timeout_and_idempotency():
     )
     client.put("/admin/scenario", json={"mode": "timeout", "delay_ms": 10})
     timeout = client.post("/notifications", json=payload, headers={"Idempotency-Key": "job-3"})
-    assert timeout.status_code == 200
+    assert timeout.status_code == 504
+    assert len(client.get("/admin/deliveries").json()) == 1

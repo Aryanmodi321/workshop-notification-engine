@@ -86,75 +86,29 @@ The mock service accepts `PUT /admin/scenario` with `{"mode":"success"}`, `{"mod
 
 ## Demonstration and tests
 
-### One HTTP failure followed by delivery
+Follow [the reliability demonstration guide](docs/reliability-demo.md) for reproducible,
+PowerShell steps covering registration and validation, asynchronous delivery, HTTP and
+timeout retries, cancellation fan-out, PostgreSQL API restart recovery, and idempotency.
+The guide states the expected states, cleanup calls, test environments, and evidence
+checks. It uses fresh IDs and restores the mock scenario to success after each failure demo.
 
-With PostgreSQL, the API, worker, and mock service running, run this in PowerShell.
-It creates a fresh workshop/member, leaves the mock at 503 until the worker records
-one failed attempt, then restores success and checks the same job and delivery key.
-The `finally` block restores success even if a check fails.
+The restart evidence has two distinct scopes. `tests/test_api_restart.py` restarts a
+test-owned API process against a temporary SQLite file and checks that a pending job
+remains; it does not start a worker or prove delivery. The opt-in
+`tests/test_postgres_api_restart_e2e.py` uses an explicitly configured dedicated
+PostgreSQL test database, a unique schema, real API and worker subprocesses, and the
+in-process mock service to verify same-job recovery and delivery. CI runs it against
+its ephemeral PostgreSQL service. Locally it runs only when
+`POSTGRES_E2E_TEST_DATABASE_URL` is explicitly set; it never falls back to `.env` or
+`DATABASE_URL`.
 
-```powershell
-$api = 'http://localhost:8000'
-$mock = 'http://localhost:8001'
-$member = 'retry-' + [guid]::NewGuid().ToString('N')
-$workshop = Invoke-RestMethod -Method Post -Uri "$api/workshops" -ContentType 'application/json' -Body (@{title='Retry demo'; description=''; scheduled_at='2030-01-01T10:00:00Z'} | ConvertTo-Json)
-try {
-    Invoke-RestMethod -Method Put -Uri "$mock/admin/scenario" -ContentType 'application/json' -Body '{"mode":"http_error","status_code":503}' | Out-Null
-    Invoke-RestMethod -Method Post -Uri "$api/workshops/$($workshop.id)/registrations" -ContentType 'application/json' -Body (@{member_id=$member} | ConvertTo-Json) | Out-Null
-    $job = $null
-    $deadline = (Get-Date).AddSeconds(20)
-    do {
-        foreach ($item in (Invoke-RestMethod -Uri "$api/notification-jobs")) {
-            if ($item.recipient -eq $member) { $job = $item; break }
-        }
-        if ($job -and $job.attempt_count -ge 1) { break }
-        Start-Sleep -Milliseconds 100
-    } while ((Get-Date) -lt $deadline)
-    if (-not $job -or $job.status -ne 'pending' -or $job.attempt_count -lt 1 -or $job.last_error -notmatch '503') { throw 'No pending job with a recorded HTTP 503 attempt was observed.' }
-    $jobId = $job.id
-    Invoke-RestMethod -Method Put -Uri "$mock/admin/scenario" -ContentType 'application/json' -Body '{"mode":"success"}' | Out-Null
-    $deadline = (Get-Date).AddSeconds(60)
-    do {
-        foreach ($item in (Invoke-RestMethod -Uri "$api/notification-jobs")) {
-            if ($item.id -eq $jobId) { $job = $item; break }
-        }
-        if ($job.status -eq 'sent') { break }
-        Start-Sleep -Milliseconds 200
-    } while ((Get-Date) -lt $deadline)
-    if ($job.status -ne 'sent') { throw "Job $jobId did not reach sent." }
-    $deliveryKey = "notification-job-$jobId"
-    $delivery = $null
-    foreach ($item in (Invoke-RestMethod -Uri "$mock/admin/deliveries")) {
-        if ($item.idempotency_key -eq $deliveryKey) { $delivery = $item; break }
-    }
-    if (-not $delivery -or $delivery.payload.recipient -ne $member) { throw "Delivery $deliveryKey was not found for $member." }
-    "Verified job $jobId: one recorded 503 attempt, status sent, delivery key $deliveryKey."
-} finally {
-    Invoke-RestMethod -Method Put -Uri "$mock/admin/scenario" -ContentType 'application/json' -Body '{"mode":"success"}' | Out-Null
-}
-```
-
-### Pending job recovery after an API restart
-
-The automated test `python -m pytest tests/test_api_restart.py` launches a test-owned
-API process against a temporary SQLite file, stops and restarts only that process, and
-checks that the same pending job remains. It does not use the configured PostgreSQL
-database or start a worker.
-
-To demonstrate recovery with the native services, stop the worker in its terminal
-with Ctrl+C. Set the mock to success, create a workshop and registration through
-`/docs`, and note the matching `pending` job ID from `GET /notification-jobs`. Stop
-and restart only the API terminal with the commands below; keep PostgreSQL and the
-mock service running:
+To run the PostgreSQL end-to-end recovery test locally, set the variable to a dedicated
+test database (never the development DB):
 
 ```powershell
-# In the API terminal: Ctrl+C, then from the repository root:
-uvicorn app.main:app --port 8000 --reload
+$env:POSTGRES_E2E_TEST_DATABASE_URL = 'postgresql+psycopg://<user>:<password>@localhost:5432/<dedicated_test_database>'
+python -m pytest tests/test_postgres_api_restart_e2e.py -v
 ```
-
-Query `GET /notification-jobs` again and confirm that the same ID and recipient are
-still `pending`. Start the worker again with `python -m app.worker`; wait for that ID
-to become `sent` and find `notification-job-<id>` in `GET /admin/deliveries`.
 
 ### Automated checks
 
@@ -167,8 +121,10 @@ python -m ruff check .
 ```
 
 API and worker tests use isolated SQLite databases and deterministic HTTP responses.
-The process-restart test uses a temporary SQLite file. The PostgreSQL concurrency test
-is skipped unless `TEST_DATABASE_URL` points to a dedicated test database. To run it,
+The process-restart test uses a temporary SQLite file. The PostgreSQL API-restart
+end-to-end test is skipped unless `POSTGRES_E2E_TEST_DATABASE_URL` points to a dedicated
+test database. The PostgreSQL concurrency test is skipped unless `TEST_DATABASE_URL`
+points to a dedicated test database. To run the concurrency test,
 set both variables to that test database, apply migrations there, and run the test:
 
 ```powershell
