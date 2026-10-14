@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: workshops
+      POSTGRES_USER: workshop
+      POSTGRES_PASSWORD: workshop
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workshop -d workshops"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://workshop:workshop@db:5432/workshops
+      NOTIFICATION_SERVICE_URL: http://mock-notifier:8001
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      mock-notifier:
+        condition: service_started
+
+  worker:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://workshop:workshop@db:5432/workshops
+      NOTIFICATION_SERVICE_URL: http://mock-notifier:8001
+    depends_on:
+      db:
+        condition: service_healthy
+      mock-notifier:
+        condition: service_started
+    restart: unless-stopped
+
+  mock-notifier:
+    build: .
+    command: ["uvicorn", "mock_service.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "8001:8001"
+
+volumes:
+  postgres_data:
