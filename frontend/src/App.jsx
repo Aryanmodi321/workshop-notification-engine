@@ -97,15 +97,15 @@ function MotionSafeFade({ children, className = '' }) {
 
 function App() {
   const [route, navigate] = useRoute();
-  if (route === '/') return <LandingPage navigate={navigate} />;
-  return <DashboardApp route={route} navigate={navigate} />;
+  const data = useDashboardData();
+  if (route === '/') return <LandingPage navigate={navigate} data={data} />;
+  return <DashboardApp route={route} navigate={navigate} data={data} />;
 }
 
-function DashboardApp({ route, navigate }) {
+function DashboardApp({ route, navigate, data }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const [toast, setToast] = useState('');
-  const data = useDashboardData();
   const page = PAGE_COPY[route];
 
   useEffect(() => {
@@ -218,14 +218,22 @@ function DashboardApp({ route, navigate }) {
   );
 }
 
-function LandingPage({ navigate }) {
+function LandingPage({ navigate, data }) {
   const reducedMotion = useReducedMotion();
   const enterDashboard = event => navigate('/app', event);
   const capabilities = [
-    { number: '01', title: 'Registration with a durable handoff', copy: 'A successful registration and its confirmation job are saved together through the transactional outbox.' },
-    { number: '02', title: 'Independent notification jobs', copy: 'Each job has its own status and bounded retry lifecycle, so one transient failure does not block the rest.' },
-    { number: '03', title: 'Cancellation fan-out', copy: 'Workshop cancellation creates a separate notification job for each registered member.' },
+    { number: '01', title: 'Durable registration handoff', copy: 'Registration and its confirmation job are committed together through the transactional outbox.', icon: CalendarDays },
+    { number: '02', title: 'Independent notification jobs', copy: 'Each job has its own status and bounded retry lifecycle, so a transient failure does not block the rest.', icon: BellRing },
+    { number: '03', title: 'Retry with context', copy: 'Attempt counts and the latest error make delivery progress easier to understand.', icon: RefreshCw },
+    { number: '04', title: 'Cancellation fan-out', copy: 'Workshop cancellation creates a separate notification job for every registered member.', icon: Activity },
   ];
+  const workshopRows = data.workshops.data || [];
+  const jobRows = data.jobs.data || [];
+  const recentJobs = [...jobRows].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 3);
+  const previewValue = (resource, value) => resource.loading ? '…' : resource.error ? '—' : value;
+  const apiStatus = healthLabel(data.health);
+  const dbStatus = healthLabel(data.databaseHealth);
+  const previewStatusClass = status => status === 'ok' ? 'is-healthy' : status === 'unavailable' ? 'is-unavailable' : 'is-checking';
   return (
     <div className="landing-shell">
       <header className="landing-nav">
@@ -237,30 +245,37 @@ function LandingPage({ navigate }) {
       <main>
         <section className="landing-hero">
           <div className="hero-glow" aria-hidden="true" />
+          <div className="hero-grid" aria-hidden="true" />
           <div className="hero-copy">
             <span className="landing-kicker"><i /> WORKSHOP REGISTRATION &amp; NOTIFICATIONS</span>
-            {reducedMotion ? <h1>Workshop operations,<br /><em>in clear view.</em></h1> : <div className="hero-title"><BlurText text="Workshop operations, in clear view." animateBy="words" delay={90} className="hero-animated-title" /></div>}
-            <p>Relay gives your team a clear view of workshop records and the notification jobs behind every registration and cancellation.</p>
-            <div className="hero-actions"><a className="button button-primary button-large" href="/app" onClick={enterDashboard}>Explore the dashboard <ArrowRight size={17} /></a><a className="hero-secondary-link" href="#workflow">See how it works <ChevronRight size={16} /></a></div>
-            <div className="hero-proof"><span><Check size={14} /> Durable job handoff</span><span><Check size={14} /> Bounded retries</span><span><Check size={14} /> Read-only dashboard</span></div>
+            {reducedMotion ? <h1>Reliable registration.<br /><em>Notifications delivered.</em></h1> : <div className="hero-title" role="heading" aria-level="1"><BlurText text="Reliable registration. Notifications delivered." animateBy="words" delay={75} className="hero-animated-title" /></div>}
+            <p>Give every registration a durable handoff and every notification a clear path through delivery, retries, and recovery.</p>
+            <div className="hero-actions"><a className="button button-primary button-large" href="/app" onClick={enterDashboard}>Open operations <ArrowRight size={17} /></a><a className="hero-secondary-link" href="#workflow">Explore the workflow <ChevronRight size={16} /></a></div>
+            <div className="hero-proof"><span><Check size={15} /> Transactional outbox</span><span><Check size={15} /> Bounded retries</span><span><Check size={15} /> Independent jobs</span></div>
           </div>
           <SpotlightCard className="landing-preview" spotlightColor="rgba(112, 137, 255, 0.2)">
-            <div className="preview-top"><div><span className="preview-overline">WORKSPACE PREVIEW</span><strong>Workshop operations</strong></div><span className="preview-live"><i /> API CONNECTED WHEN CONFIGURED</span></div>
+            <div className="preview-top"><div><span className="preview-overline">LIVE API SNAPSHOT</span><strong>Operations at a glance</strong></div><span className={`preview-live ${previewStatusClass(apiStatus)}`}><i /> API {apiStatus}</span></div>
             <div className="preview-content">
-              <div className="preview-side"><span className="preview-logo"><BellRing size={13} /></span><i /><i /><i /></div>
-              <div className="preview-main"><div className="preview-heading"><div><span>OVERVIEW</span><strong>Your operations</strong></div><span className="preview-date">Live API values</span></div>
-                <div className="preview-metrics"><div><span>Workshops</span><b>—</b><small>Loaded from API</small></div><div><span>Notification jobs</span><b>—</b><small>Loaded from API</small></div><div><span>API status</span><b className="preview-status">●</b><small>Connection check</small></div></div>
-                <div className="preview-list"><div className="preview-list-head"><strong>Notification queue</strong><span>GET /notification-jobs</span></div><div className="preview-row"><i className="preview-dot pending"/><span>Confirmation job</span><code>pending</code></div><div className="preview-row"><i className="preview-dot sent"/><span>Cancellation job</span><code>sent</code></div></div>
-                <div className="preview-caption">Illustrative interface only · live records appear in the dashboard</div>
+              <div className="preview-side"><span className="preview-logo"><BellRing size={15} /></span><i /><i /><i /></div>
+              <div className="preview-main"><div className="preview-heading"><div><span>OVERVIEW</span><strong>Workspace activity</strong></div><span className="preview-date">Current response</span></div>
+                <div className="preview-metrics">
+                  <div><span>Workshops</span><b>{previewValue(data.workshops, workshopRows.length)}</b><small>{data.workshops.error ? 'Unavailable' : 'Returned by API'}</small></div>
+                  <div><span>Notification jobs</span><b>{previewValue(data.jobs, jobRows.length)}</b><small>{data.jobs.error ? 'Unavailable' : 'Returned by API'}</small></div>
+                  <div><span>API health</span><b className={`preview-health ${previewStatusClass(apiStatus)}`}>{apiStatus}</b><small>GET /health</small></div>
+                  <div><span>Database</span><b className={`preview-health ${previewStatusClass(dbStatus)}`}>{dbStatus}</b><small>GET /health/db</small></div>
+                </div>
+                <div className="preview-list"><div className="preview-list-head"><strong>Recent notification jobs</strong><span>GET /notification-jobs</span></div>
+                  {data.jobs.loading ? <div className="preview-empty"><span className="preview-pulse" />Loading notification jobs…</div> : data.jobs.error ? <div className="preview-empty preview-error">Notification jobs are unavailable. Open the dashboard to retry.</div> : recentJobs.length ? recentJobs.map(job => <div className="preview-row" key={job.id}><i className={`preview-dot ${job.status}`} /><span><strong>{eventLabel(job.event_type)}</strong><small>{job.recipient}</small></span><code className={`preview-job-status status-${job.status}`}>{statusLabel(job.status)}</code></div>) : <div className="preview-empty">No notification jobs returned by the API.</div>}
+                </div>
+                <div className="preview-caption"><span className="preview-caption-dot" /> Values shown are current API responses, not sample data.</div>
               </div>
             </div>
           </SpotlightCard>
-          <div className="hero-orbit orbit-one" aria-hidden="true" /><div className="hero-orbit orbit-two" aria-hidden="true" />
         </section>
 
         <section className="landing-section capabilities-section" id="capabilities">
-          <div className="landing-section-heading"><span className="section-kicker">BUILT AROUND THE WORKFLOW</span><h2>Every registration has a clear next step.</h2><p>Workshop records and notification delivery stay connected, even when a service needs another attempt.</p></div>
-          <div className="capability-grid">{capabilities.map(item => <article className="capability-card" key={item.number}><span className="capability-number">{item.number}</span><div className="capability-icon">{item.number === '01' ? <CalendarDays /> : item.number === '02' ? <RefreshCw /> : <BellRing />}</div><h3>{item.title}</h3><p>{item.copy}</p></article>)}</div>
+          <div className="landing-section-heading"><span className="section-kicker">BUILT AROUND THE WORKFLOW</span><h2>Operations stay clear, even when delivery gets complex.</h2><p>Registration, persistence, and notification work together as one understandable flow.</p></div>
+          <div className="capability-grid">{capabilities.map(item => { const Icon = item.icon; return <SpotlightCard className={`capability-card capability-card-${item.number}`} spotlightColor="rgba(82, 105, 224, 0.12)" key={item.number}><span className="capability-number">{item.number}</span><div className="capability-icon"><Icon size={20} /></div><h3>{item.title}</h3><p>{item.copy}</p><ArrowUpRight className="capability-arrow" size={18} aria-hidden="true" /></SpotlightCard>; })}</div>
         </section>
 
         <section className="workflow-section" id="workflow"><div className="workflow-inner"><div className="workflow-intro"><span className="section-kicker">HOW RELAY WORKS</span><h2>From registration to delivery, without losing the thread.</h2><p>The dashboard reads current API records. The backend handles persistence and delivery attempts.</p><a className="text-link" href="/app" onClick={enterDashboard}>View operations <ArrowRight size={15} /></a></div><div className="workflow-steps"><div><span>01</span><section><strong>Register</strong><p>A member registration and its confirmation job are committed together.</p></section></div><div><span>02</span><section><strong>Process independently</strong><p>A worker picks up each durable job without holding the registration request open for delivery.</p></section></div><div><span>03</span><section><strong>Retry transient issues</strong><p>Temporary delivery failures are retried within the configured attempt limit.</p></section></div><div><span>04</span><section><strong>Fan out cancellations</strong><p>Cancellation creates an independent job for every registered member.</p></section></div></div></div></section>
@@ -293,11 +308,11 @@ function OverviewPage({ workshops, jobs, onSelectJob, onNavigate }) {
       <section className="metric-grid" aria-label="Workspace summary">
         {summary.map(metric => {
           const Icon = metricIcons[metric.icon];
-          return <article className="metric-card" key={metric.label}>
+          return <SpotlightCard className="metric-card-spotlight" spotlightColor="rgba(82, 105, 224, 0.12)" key={metric.label}><article className="metric-card">
             <div className="metric-top"><span>{metric.label}</span><span className={`metric-icon metric-${metric.tone}`}><Icon size={18} /></span></div>
             <strong className="metric-value">{workshops.loading || jobs.loading ? '…' : metric.value ?? '—'}</strong>
             <div className="metric-foot"><span>{metric.detail}</span></div>
-          </article>;
+          </article></SpotlightCard>;
         })}
       </section>
 
@@ -315,14 +330,14 @@ function OverviewPage({ workshops, jobs, onSelectJob, onNavigate }) {
           <div className="health-list">
             {['pending', 'processing', 'sent', 'dead'].map(status => <div key={status}><span className="health-label"><i className={`health-dot ${status}-dot`} /> {statusLabel(status)}</span><strong>{jobs.loading ? '…' : jobRows.filter(job => job.status === status).length}</strong></div>)}
           </div>
-          <button className="text-link" onClick={() => onNavigate('/notifications')}>View notification queue <ArrowRight size={15} /></button>
+          <button className="text-link" onClick={() => onNavigate('/app/notifications')}>View notification queue <ArrowRight size={15} /></button>
         </article>
       </section>
 
       <section className="card table-card">
           <div className="card-header table-card-header">
           <div><div className="title-with-tag"><h2>Recent notifications</h2></div><p>Latest jobs returned by the API</p></div>
-          <button className="button button-secondary" onClick={() => onNavigate('/notifications')}>View all <ArrowRight size={15} /></button>
+          <button className="button button-secondary" onClick={() => onNavigate('/app/notifications')}>View all <ArrowRight size={15} /></button>
         </div>
         {jobs.error ? <ResourceMessage resource={jobs} label="Notification jobs" /> : jobs.loading ? <ResourceMessage resource={jobs} label="Notification jobs" /> : recentJobs.length === 0 ? <EmptyState title="No notification jobs" message="The API returned an empty job list." /> : <NotificationTable jobs={recentJobs} onSelect={onSelectJob} compact />}
       </section>

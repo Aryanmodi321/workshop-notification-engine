@@ -43,12 +43,18 @@ export default function BlurText({
   stepDuration = 0.35,
 }: BlurTextProps) {
   const elements = animateBy === 'words' ? text.split(' ') : text.split('');
-  const [inView, setInView] = useState(false);
+  // If IntersectionObserver is unavailable, render the final text immediately.
+  const [inView, setInView] = useState(() => typeof IntersectionObserver === 'undefined');
   const ref = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     const element = ref.current;
     if (!element) return undefined;
+
+    if (typeof IntersectionObserver === 'undefined') {
+      setInView(true);
+      return undefined;
+    }
 
     const observer = new IntersectionObserver(
       ([entry]) => {
